@@ -16,8 +16,9 @@ class CerberusDaemon(ServiceDaemon):
         from cerberus.permission_checking_worker import SubscriptionPermissionCommandProcessor
         from cerberus.permission_checking_worker import MetaStreamEventsCommandProcessor
 
-        self.command_processors = [UserIdentificationCommandProcessor(), SubscriptionPermissionCommandProcessor(),
-                                   MetaStreamEventsCommandProcessor()]
+        self.command_processors = [UserIdentificationCommandProcessor("cerberus"),
+                                   SubscriptionPermissionCommandProcessor("cerberus"),
+                                   MetaStreamEventsCommandProcessor("cerberus")]
         for command_processor in self.command_processors:
             command_processor.start()
 
