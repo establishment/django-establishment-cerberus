@@ -77,7 +77,7 @@ class UserIdentificationCommandProcessor(BaseRedisCommandProcessor):
         user = get_user(request)
 
         user_id = -1
-        if user and user.is_authenticated():
+        if user and user.is_authenticated:
             user_id = user.id
 
         return {
