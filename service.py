@@ -12,19 +12,21 @@ class CerberusDaemon(ServiceDaemon):
         self.logger.info("Operating system: " + os.name + " -- " + sys.platform)
         self.logger.info("File system encoding: " + sys.getfilesystemencoding())
 
+        from establishment.misc.command_processor import CommandProcessorHandler
         from cerberus.permission_checking_worker import UserIdentificationCommandProcessor
         from cerberus.permission_checking_worker import SubscriptionPermissionCommandProcessor
         from cerberus.permission_checking_worker import MetaStreamEventsCommandProcessor
 
-        self.command_processors = [UserIdentificationCommandProcessor("cerberus"),
-                                   SubscriptionPermissionCommandProcessor("cerberus"),
-                                   MetaStreamEventsCommandProcessor("cerberus")]
-        for command_processor in self.command_processors:
-            command_processor.start()
+        self.command_processor_handler = CommandProcessorHandler([UserIdentificationCommandProcessor("cerberus"),
+                                                                  SubscriptionPermissionCommandProcessor("cerberus"),
+                                                                  MetaStreamEventsCommandProcessor("cerberus")])
+
+        self.command_processor_handler.start()
 
         while not self.terminate:
             time.sleep(1)
         self.logger.warning("Terminating")
 
-        for command_processor in self.command_processors:
-            command_processor.stop()
+        self.command_processor_handler.stop()
+
+        self.command_processor_handler.wait_to_finish()

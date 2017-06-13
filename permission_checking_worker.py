@@ -1,38 +1,41 @@
 from django.contrib.auth import get_user, get_user_model
 
 from establishment.chat.models import GroupChat, PrivateChat
-from establishment.funnel.nodews_meta import NodeWSMeta
 from establishment.funnel.permission_checking import user_can_subscribe_to_stream, guest_can_subscribe_to_stream
 from establishment.funnel.redis_stream import RedisStreamPublisher
-from establishment.misc.command_processor import BaseRedisCommandProcessor
+from establishment.misc.greenlet_workers import GreenletRedisQueueCommandProcessor, GreenletQueueWorker
 
 # TODO: Use the default Django session engine
 import redis_sessions.session as session_engine
 
 
-class SubscriptionPermissionCommandProcessor(BaseRedisCommandProcessor):
-    def __init__(self, logger_name):
-        super().__init__(logger_name, "meta-subscription-permissions")
-
+class GreenletSubscriptionPermissionWorker(GreenletQueueWorker):
     def process_command(self, command):
+        if "responseStream" not in command:
+            self.error("Invalid user identification request: no responseStream field!")
+            return
+
+        response_stream = command["responseStream"]
+
         if "userId" not in command:
-            self.logger.error("Invalid user identification request: no userId field!")
-            return {
+            self.error("Invalid user identification request: no userId field!")
+            RedisStreamPublisher.publish_to_stream(message={
                 "canRegister": False,
                 "reason": "Invalid Cerberus request!",
                 "streamName": "INVALID_STREAM_NAME",
                 "userId": -1
-            }
+            }, stream_name=response_stream, raw=True)
+            return
         user_id = command["userId"]
 
         if "streamName" not in command:
-            self.logger.error("Invalid user identification request: no streamName field! ")
-            return {
+            self.error("Invalid user identification request: no streamName field! ")
+            RedisStreamPublisher.publish_to_stream(message={
                 "canRegister": False,
                 "reason": "Invalid Cerberus request!",
                 "streamName": "INVALID_STREAM_NAME",
                 "userId": user_id
-            }
+            }, stream_name=response_stream, raw=True)
         stream_name = command["streamName"]
 
         if user_id == 0:
@@ -45,12 +48,18 @@ class SubscriptionPermissionCommandProcessor(BaseRedisCommandProcessor):
             can_register, reason = can_register
         except Exception:
             reason = "Default"
-        return {
+        RedisStreamPublisher.publish_to_stream(message={
             "canRegister": can_register,
             "reason": reason,
             "streamName": stream_name,
             "userId": user_id
-        }
+        }, stream_name=response_stream, raw=True)
+
+
+class SubscriptionPermissionCommandProcessor(GreenletRedisQueueCommandProcessor):
+    def __init__(self, logger_name):
+        super().__init__(logger_name, GreenletSubscriptionPermissionWorker, "meta-subscription-permissions",
+                         num_workers=10)
 
 
 class OurRequest(object):
@@ -58,17 +67,20 @@ class OurRequest(object):
         self.session = dict()
 
 
-class UserIdentificationCommandProcessor(BaseRedisCommandProcessor):
-    def __init__(self, logger_name):
-        super().__init__(logger_name, "meta-user-identification")
-
+class GreenletUserIdentificationWorker(GreenletQueueWorker):
     def process_command(self, command):
+        if "responseStream" not in command:
+            self.error("Invalid user identification request: no responseStream field!")
+            return
+
+        response_stream = command["responseStream"]
+
         if "sessionKey" not in command:
             self.logger.error("Invalid user identification request: no sessionKey found! ")
-            return {
+            RedisStreamPublisher.publish_to_stream(message={
                 "sessionKey": "INVALID_SESSION_KEY",
                 "userId": -1
-            }
+            }, stream_name=response_stream, raw=True)
         session_key = command["sessionKey"]
 
         request = OurRequest()
@@ -80,10 +92,15 @@ class UserIdentificationCommandProcessor(BaseRedisCommandProcessor):
         if user and user.is_authenticated:
             user_id = user.id
 
-        return {
+        RedisStreamPublisher.publish_to_stream(message={
             "sessionKey": session_key,
             "userId": user_id,
-        }
+        }, stream_name=response_stream, raw=True)
+
+
+class UserIdentificationCommandProcessor(GreenletRedisQueueCommandProcessor):
+    def __init__(self, logger_name):
+        super().__init__(logger_name, GreenletUserIdentificationWorker, "meta-user-identification", num_workers=10)
 
 
 def stream_need_online_users(stream):
@@ -98,11 +115,7 @@ def stream_message_thread_get_id(stream):
     return -1
 
 
-class MetaStreamEventsCommandProcessor(BaseRedisCommandProcessor):
-    def __init__(self, logger_name):
-        super().__init__(logger_name, "meta-stream-events")
-        self.meta = NodeWSMeta()
-
+class GreenletMetaStreamEventsWorker(GreenletQueueWorker):
     def process_command(self, command):
         if command["command"] == "streamEvent":
             if command["event"] == "joined":
@@ -112,8 +125,7 @@ class MetaStreamEventsCommandProcessor(BaseRedisCommandProcessor):
 
         return None
 
-    @staticmethod
-    def broadcast_join_event(stream, user_id):
+    def broadcast_join_event(self, stream, user_id):
         if not stream_need_online_users(stream):
             return
 
@@ -130,8 +142,7 @@ class MetaStreamEventsCommandProcessor(BaseRedisCommandProcessor):
 
         RedisStreamPublisher.publish_to_stream(stream, event, persistence=False)
 
-    @staticmethod
-    def broadcast_left_event(stream, user_id):
+    def broadcast_left_event(self, stream, user_id):
         if not stream_need_online_users(stream):
             return
 
@@ -147,3 +158,8 @@ class MetaStreamEventsCommandProcessor(BaseRedisCommandProcessor):
         }
 
         RedisStreamPublisher.publish_to_stream(stream, event, persistence=False)
+
+
+class MetaStreamEventsCommandProcessor(GreenletRedisQueueCommandProcessor):
+    def __init__(self, logger_name):
+        super().__init__(logger_name, GreenletMetaStreamEventsWorker, "meta-stream-events")
