@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user, get_user_model
 
+from establishment.funnel.utils import DBObjectCacheWithNull
 from establishment.chat.models import GroupChat, PrivateChat
 from establishment.funnel.permission_checking import user_can_subscribe_to_stream, guest_can_subscribe_to_stream
 from establishment.funnel.redis_stream import RedisStreamPublisher
@@ -8,8 +9,15 @@ from establishment.misc.greenlet_workers import GreenletRedisQueueCommandProcess
 # TODO: Use the default Django session engine
 import redis_sessions.session as session_engine
 
+GREENLET_JOB_QUEUE_MAX_SIZE = 4 * 1024
+GREENLET_WORKERS_THREAD = 64
+
 
 class GreenletSubscriptionPermissionWorker(GreenletQueueWorker):
+    def __init__(self, job_queue=None, result_queue=None, logger=None, context=None):
+        super().__init__(job_queue=job_queue, result_queue=result_queue, logger=logger, context=context)
+        self.user_cache = context["userCache"]
+
     def process_command(self, command):
         if "responseStream" not in command:
             self.error("Invalid user identification request: no responseStream field!")
@@ -41,8 +49,7 @@ class GreenletSubscriptionPermissionWorker(GreenletQueueWorker):
         if user_id == 0:
             can_register = guest_can_subscribe_to_stream(stream_name)
         else:
-            UserModel = get_user_model()
-            user = UserModel.objects.get(id=user_id)
+            user = self.user_cache.get(id=user_id)
             can_register = user_can_subscribe_to_stream(user, stream_name)
         try:
             can_register, reason = can_register
@@ -59,7 +66,10 @@ class GreenletSubscriptionPermissionWorker(GreenletQueueWorker):
 class SubscriptionPermissionCommandProcessor(GreenletRedisQueueCommandProcessor):
     def __init__(self, logger_name):
         super().__init__(logger_name, GreenletSubscriptionPermissionWorker, "meta-subscription-permissions",
-                         num_workers=10)
+                         num_workers=GREENLET_WORKERS_THREAD, job_queue_max_size=GREENLET_JOB_QUEUE_MAX_SIZE)
+        self.worker_context = {
+            "userCache": DBObjectCacheWithNull(get_user_model(), default_max_age=30)
+        }
 
 
 class OurRequest(object):
@@ -100,7 +110,8 @@ class GreenletUserIdentificationWorker(GreenletQueueWorker):
 
 class UserIdentificationCommandProcessor(GreenletRedisQueueCommandProcessor):
     def __init__(self, logger_name):
-        super().__init__(logger_name, GreenletUserIdentificationWorker, "meta-user-identification", num_workers=10)
+        super().__init__(logger_name, GreenletUserIdentificationWorker, "meta-user-identification",
+                         num_workers=GREENLET_WORKERS_THREAD, job_queue_max_size=GREENLET_JOB_QUEUE_MAX_SIZE)
 
 
 def stream_need_online_users(stream):
@@ -162,4 +173,5 @@ class GreenletMetaStreamEventsWorker(GreenletQueueWorker):
 
 class MetaStreamEventsCommandProcessor(GreenletRedisQueueCommandProcessor):
     def __init__(self, logger_name):
-        super().__init__(logger_name, GreenletMetaStreamEventsWorker, "meta-stream-events")
+        super().__init__(logger_name, GreenletMetaStreamEventsWorker, "meta-stream-events",
+                         num_workers=GREENLET_WORKERS_THREAD, job_queue_max_size=GREENLET_JOB_QUEUE_MAX_SIZE)
