@@ -1,6 +1,6 @@
 from django.contrib.auth import get_user, get_user_model
 
-from establishment.funnel.utils import DBObjectCacheWithNull
+from establishment.funnel.utils import DBObjectStoreWithNull
 from establishment.chat.models import GroupChat, PrivateChat
 from establishment.funnel.permission_checking import user_can_subscribe_to_stream, guest_can_subscribe_to_stream
 from establishment.funnel.redis_stream import RedisStreamPublisher
@@ -68,7 +68,7 @@ class SubscriptionPermissionCommandProcessor(GreenletRedisQueueCommandProcessor)
         super().__init__(logger_name, GreenletSubscriptionPermissionWorker, "meta-subscription-permissions",
                          num_workers=GREENLET_WORKERS_THREAD, job_queue_max_size=GREENLET_JOB_QUEUE_MAX_SIZE)
         self.worker_context = {
-            "userCache": DBObjectCacheWithNull(get_user_model(), default_max_age=30)
+            "userCache": DBObjectStoreWithNull(get_user_model(), default_max_age=30)
         }
 
 
