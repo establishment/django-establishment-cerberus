@@ -1,6 +1,6 @@
 from django.contrib.auth import get_user, get_user_model
 
-from establishment.funnel.utils import DBObjectStoreWithNull
+from establishment.funnel.state import DBObjectStoreWithNull
 from establishment.chat.models import GroupChat, PrivateChat
 from establishment.funnel.permission_checking import user_can_subscribe_to_stream, guest_can_subscribe_to_stream
 from establishment.funnel.redis_stream import RedisStreamPublisher
