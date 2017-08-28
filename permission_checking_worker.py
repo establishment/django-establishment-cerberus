@@ -1,13 +1,12 @@
+# TODO: Use the default Django session engine
+import redis_sessions.session as session_engine
 from django.contrib.auth import get_user, get_user_model
 
-from establishment.funnel.state import DBObjectStoreWithNull
 from establishment.chat.models import GroupChat, PrivateChat
 from establishment.funnel.permission_checking import user_can_subscribe_to_stream, guest_can_subscribe_to_stream
 from establishment.funnel.redis_stream import RedisStreamPublisher
 from establishment.misc.greenlet_workers import GreenletRedisQueueCommandProcessor, GreenletQueueWorker
-
-# TODO: Use the default Django session engine
-import redis_sessions.session as session_engine
+from establishment.webapp.state import DBObjectStoreWithNull
 
 GREENLET_JOB_QUEUE_MAX_SIZE = 4 * 1024
 GREENLET_WORKERS_THREAD = 64
