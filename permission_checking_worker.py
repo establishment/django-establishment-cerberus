@@ -1,5 +1,7 @@
-# TODO: Use the default Django session engine
-import redis_sessions.session as session_engine
+from importlib import import_module
+
+from django.conf import settings
+
 from django.contrib.auth import get_user, get_user_model
 
 from establishment.chat.models import GroupChat, PrivateChat
@@ -77,6 +79,14 @@ class OurRequest(object):
 
 
 class GreenletUserIdentificationWorker(GreenletQueueWorker):
+    session_engine = None
+
+    @classmethod
+    def get_session_engine(cls):
+        if cls.session_engine is None:
+            cls.session_engine = import_module(settings.SESSION_ENGINE)
+        return cls.session_engine
+
     def process_command(self, command):
         if "responseStream" not in command:
             self.error("Invalid user identification request: no responseStream field!")
@@ -93,7 +103,8 @@ class GreenletUserIdentificationWorker(GreenletQueueWorker):
         session_key = command["sessionKey"]
 
         request = OurRequest()
-        request.session = session_engine.SessionStore(session_key)
+
+        request.session = self.get_session_engine().SessionStore(session_key)
 
         user = get_user(request)
 
@@ -125,6 +136,7 @@ def stream_message_thread_get_id(stream):
     return -1
 
 
+# TODO: this should be in some other part
 class GreenletMetaStreamEventsWorker(GreenletQueueWorker):
     def process_command(self, command):
         if command["command"] == "streamEvent":
