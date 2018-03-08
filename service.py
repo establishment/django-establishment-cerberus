@@ -6,6 +6,9 @@ from establishment.services.service_daemon import ServiceDaemon
 
 
 class CerberusDaemon(ServiceDaemon):
+    def setup_logging(self):
+        # TODO: WHY DOES THIS WORK??? FIX IT IN ESTABLISHMENT
+        pass
 
     def run(self):
         self.logger.info("Cerberus Daemon 1.0")
