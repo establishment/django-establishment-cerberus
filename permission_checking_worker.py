@@ -4,7 +4,6 @@ from django.conf import settings
 
 from django.contrib.auth import get_user, get_user_model
 
-from establishment.chat.models import GroupChat, PrivateChat
 from establishment.funnel.permission_checking import user_can_subscribe_to_stream, guest_can_subscribe_to_stream
 from establishment.funnel.redis_stream import RedisStreamPublisher
 from establishment.misc.greenlet_workers import GreenletRedisQueueCommandProcessor, GreenletQueueWorker
@@ -124,16 +123,11 @@ class UserIdentificationCommandProcessor(GreenletRedisQueueCommandProcessor):
                          num_workers=GREENLET_WORKERS_THREAD, job_queue_max_size=GREENLET_JOB_QUEUE_MAX_SIZE)
 
 
-def stream_need_online_users(stream):
-    return GroupChat.matches_stream_name(stream)
-
-
-def stream_message_thread_get_id(stream):
-    if GroupChat.matches_stream_name(stream):
-        return int(GroupChat.stream_name_pattern.split(stream)[2])
-    if PrivateChat.matches_stream_name(stream):
-        return int(PrivateChat.stream_name_pattern.split(stream)[3])
-    return -1
+def get_activity_stream_matcher(stream):
+    for matcher in getattr(settings, "ACTIVITY_STREAMS_MATCHERS", []):
+        if matcher.matches_stream_name(stream):
+            return matcher
+    return None
 
 
 # TODO: this should be in some other part
@@ -148,7 +142,8 @@ class GreenletMetaStreamEventsWorker(GreenletQueueWorker):
         return None
 
     def broadcast_join_event(self, stream, user_id):
-        if not stream_need_online_users(stream):
+        activity_stream_matcher = get_activity_stream_matcher(stream)
+        if activity_stream_matcher is None:
             return
 
         data = {
@@ -158,14 +153,15 @@ class GreenletMetaStreamEventsWorker(GreenletQueueWorker):
         event = {
             "objectType": "messagethread",
             "type": "onlineDeltaJoined",
-            "objectId": stream_message_thread_get_id(stream),
+            "objectId": activity_stream_matcher.get_message_thread_id(stream),
             "data": data,
         }
 
         RedisStreamPublisher.publish_to_stream(stream, event, persistence=False)
 
     def broadcast_left_event(self, stream, user_id):
-        if not stream_need_online_users(stream):
+        activity_stream_matcher = get_activity_stream_matcher(stream)
+        if activity_stream_matcher is None:
             return
 
         data = {
@@ -175,7 +171,7 @@ class GreenletMetaStreamEventsWorker(GreenletQueueWorker):
         event = {
             "objectType": "messagethread",
             "type": "onlineDeltaLeft",
-            "objectId": stream_message_thread_get_id(stream),
+            "objectId": activity_stream_matcher.get_message_thread_id(stream),
             "data": data,
         }
 
